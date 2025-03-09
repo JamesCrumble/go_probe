@@ -1,7 +1,7 @@
 import time
 import requests
 
-CYCLES: int = 1000
+CYCLES: int = 100
 DELAY_SECONDS: float = 0
 
 probes = [

@@ -6,14 +6,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/segmentio/kafka-go"
-)
-
-const (
-	DEBUG             = false
-	KAFKA_ADDR        = "localhost:9092"
-	PROCESSABLE_COUNT = 50000
-	TIMEOUT_SECONDS   = 10
 )
 
 func logDebug(msg string) {
@@ -23,8 +17,25 @@ func logDebug(msg string) {
 	log.Println(msg)
 }
 
-func Probe(ctx context.Context) ([]string, error) {
-	topic := "test-topic"
+type ProbeKafka struct {
+	name string
+}
+
+func (probe ProbeKafka) Name() string {
+	return probe.name
+}
+
+const (
+	DEBUG             = false
+	KAFKA_ADDR        = "localhost:9092"
+	PROCESSABLE_COUNT = 50000
+	TIMEOUT_SECONDS   = 10
+	TOPIC             = "test-topic"
+)
+
+func (probe ProbeKafka) Present(ctx *gin.Context) (any, error) {
+	kafkaCtx, cancel := context.WithTimeout(ctx, time.Second*TIMEOUT_SECONDS)
+	defer cancel()
 
 	kafkaWriter := kafka.NewWriter(kafka.WriterConfig{
 		Brokers:      []string{KAFKA_ADDR},
@@ -41,7 +52,7 @@ func Probe(ctx context.Context) ([]string, error) {
 	kafkaReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:               []string{KAFKA_ADDR},
 		GroupID:               "",
-		Topic:                 topic,
+		Topic:                 TOPIC,
 		MinBytes:              1,
 		MaxBytes:              1000000,
 		MaxWait:               100 * time.Millisecond,
@@ -55,15 +66,15 @@ func Probe(ctx context.Context) ([]string, error) {
 	var kafkaMsg kafka.Message
 	for i := range PROCESSABLE_COUNT {
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-kafkaCtx.Done():
+			return nil, kafkaCtx.Err()
 		default:
 			msgContent := fmt.Sprintf("msg_%d", i)
 			if DEBUG {
 				fmt.Printf("Producer: %s", fmt.Sprintf("Messages %d out of %d\r", i+1, PROCESSABLE_COUNT))
 			}
-			kafkaMsg = kafka.Message{Key: []byte(fmt.Sprintf("msg_%d", i)), Value: []byte(msgContent), Topic: topic}
-			if err := kafkaWriter.WriteMessages(ctx, kafkaMsg); err != nil {
+			kafkaMsg = kafka.Message{Key: []byte(fmt.Sprintf("msg_%d", i)), Value: []byte(msgContent), Topic: TOPIC}
+			if err := kafkaWriter.WriteMessages(kafkaCtx, kafkaMsg); err != nil {
 				logDebug(err.Error())
 				withErrs++
 			}
@@ -77,10 +88,10 @@ func Probe(ctx context.Context) ([]string, error) {
 	msgs := make([]string, PROCESSABLE_COUNT-withErrs)
 	for i := range PROCESSABLE_COUNT - withErrs {
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-kafkaCtx.Done():
+			return nil, kafkaCtx.Err()
 		default:
-			msg, err := kafkaReader.FetchMessage(ctx)
+			msg, err := kafkaReader.FetchMessage(kafkaCtx)
 			if err != nil {
 				return nil, err
 			}
@@ -89,4 +100,8 @@ func Probe(ctx context.Context) ([]string, error) {
 	}
 
 	return msgs, nil
+}
+
+func Realization() ProbeKafka {
+	return ProbeKafka{"kafka"}
 }

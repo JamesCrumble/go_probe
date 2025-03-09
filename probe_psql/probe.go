@@ -1,5 +1,7 @@
 package probe_psql
 
+import "github.com/gin-gonic/gin"
+
 const PSQL_QUERY string = `
 with fraud_contractor_source as (
 	select
@@ -26,6 +28,18 @@ type ContractorInfo struct {
 	ContractorInns []string
 }
 
-func Probe() ([]ContractorInfo, error) {
+type ProbePsql struct {
+	name string
+}
+
+func (probe ProbePsql) Name() string {
+	return probe.name
+}
+
+func (probe ProbePsql) Present(_ *gin.Context) (any, error) {
 	return probePsqlExtractDataDueReflect[ContractorInfo](PSQL_QUERY)
+}
+
+func Realization() ProbePsql {
+	return ProbePsql{"psql"}
 }

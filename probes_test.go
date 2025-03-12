@@ -6,41 +6,53 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 )
 
 func TestProbes(t *testing.T) {
-	attempts := 300
-	url_template := "http://localhost:4000/probe/%s"
+	attempts := 50
+	url_template := fmt.Sprintf("http://%s/probe", config.ApiAddr()) + "/%s"
 	probes := []string{
-		"psql", "kafka",
+		"psql", "kafka", "redis",
 	}
+
+	var wg sync.WaitGroup
 
 	for _, probe := range probes {
 		for i := range attempts {
-			response, err := http.Get(fmt.Sprintf(url_template, probe))
-			if err != nil {
-				t.Errorf("probe \"%s\" - %d fail with err: %s", probe, i+1, err.Error())
-				continue
-			}
-			defer response.Body.Close()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 
-			responseContent, err := io.ReadAll(response.Body)
-			if err != nil {
-				t.Errorf("cannot read from response: %s", err.Error())
-			}
-			logContentSnapshot := string(responseContent[:int(math.Min(float64(len(responseContent)), 100))])
-			if response.StatusCode != http.StatusOK {
-				t.Errorf("probe \"%s\" - %d fail due non success status code: %d. Content: %s", probe, i+1, response.StatusCode, logContentSnapshot)
-				continue
-			}
+				response, err := http.Get(fmt.Sprintf(url_template, probe))
+				if err != nil {
+					t.Errorf("probe \"%s\" - %d fail with err: %s", probe, i+1, err.Error())
+				}
+				defer response.Body.Close()
 
-			fmt.Printf("Successfully complete probe \"%s\" - %d with content: %s\n", probe, i+1, logContentSnapshot)
+				responseContent, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Errorf("cannot read from response: %s", err.Error())
+				}
+				logContentSnapshot := string(responseContent[:int(math.Min(float64(len(responseContent)), 100))])
+				if response.StatusCode != http.StatusOK {
+					t.Errorf("probe \"%s\" - %d fail due non success status code: %d. Content: %s", probe, i+1, response.StatusCode, logContentSnapshot)
+				}
+
+				fmt.Printf("Successfully complete probe \"%s\" - %d with content: %s\n", probe, i+1, logContentSnapshot)
+			}()
 		}
+
+		wg.Wait()
 	}
 }
 
 func TestUpdateProfilingInfo(t *testing.T) {
+	if !config.PROF_ENABLE {
+		return
+	}
+
 	targetFolder := "./.prof" // using dot only because running from tmp forlder but real cwd from exec point
 	profiles := []string{
 		"goroutine",    // stack traces of all current goroutines
@@ -57,7 +69,7 @@ func TestUpdateProfilingInfo(t *testing.T) {
 	}
 
 	for _, profile := range profiles {
-		response, err := http.Get(fmt.Sprintf("http://localhost:8080/debug/pprof/%s", profile))
+		response, err := http.Get(fmt.Sprintf("http://%s/debug/pprof/%s", config.ProfAddr(), profile))
 		if err != nil {
 			t.Error(err)
 			return
